@@ -2,55 +2,38 @@ import { createMiddleware } from "hono/factory";
 import { AppConfig } from "./appConfig";
 import { Context, Hono } from "hono";
 
+type Env = AppConfig["env"];
 type FlagValue = boolean | string;
 type FlagValueOptional = FlagValue | undefined;
 type Flag = {
 	type: "boolean" | "string";
 	default: boolean | string;
 	description: string;
-	value: Partial<Record<AppConfig["env"], FlagValue>>;
+	value: Partial<Record<Env, FlagValue>>;
 };
+type Flags = Record<string, Flag>;
 
-interface StorageStrategy {
-	getValue: (flag: string, enviroment: AppConfig["env"]) => FlagValueOptional;
+export interface StorageProvider {
+	flags: Flags;
+	getValue(flag: string, enviroment: Env): Promise<FlagValueOptional>;
 }
 
-class MemoryStorage implements StorageStrategy {
-	private flags: Record<string, Flag>;
-
+export class MemoryStorageAdapter implements StorageProvider {
+	flags: Flags = {};
 	constructor(flags: Record<string, Flag>) {
 		this.flags = flags;
 	}
 
-	getValue(flag: string, enviroment: AppConfig["env"]): FlagValueOptional {
+	async getValue(flag: string, enviroment: Env): Promise<FlagValueOptional> {
 		const flagData = this.flags[flag];
-		if (!flagData) return undefined;
+		if (!flagData) return Promise.reject(new Error(`Flag ${flag} not found`));
 
-		return flagData.value[enviroment] ?? flagData.default;
-	}
-}
-class RedisStorage implements StorageStrategy {
-	getValue(flag: string, enviroment: AppConfig["env"]): FlagValueOptional {
-		// Implement Redis logic here
-		// This is a placeholder implementation
-		return undefined;
+		return Promise.resolve(flagData.value[enviroment] ?? flagData.default);
 	}
 }
 
-export enum StorageType {
-	Memory,
-	Redis,
-}
 export type HataConfig = {
-	storage:
-		| {
-				type: StorageType.Memory;
-				flags: Record<string, Flag>;
-		  }
-		| {
-				type: StorageType.Redis;
-				url: string;
-		  };
+	adapter: StorageProvider;
 	panel: {
 		enabled: boolean;
 		canAccess: (c: Context) => boolean;
@@ -59,9 +42,10 @@ export type HataConfig = {
 
 declare module "hono" {
 	interface Context {
-		flag: (flag: string) => FlagValueOptional;
+		flag: (flag: string) => Promise<FlagValueOptional>;
 	}
 }
+
 const hata = (app: Hono, config: HataConfig) => {
 	if (config.panel.enabled) {
 		app.get("/hata", (c) => {
@@ -74,24 +58,9 @@ const hata = (app: Hono, config: HataConfig) => {
 		});
 	}
 	return createMiddleware(async (c, next) => {
-		// Get the main app instance
-		console.log(app);
-		let strategy: StorageStrategy;
-		switch (config.storage.type) {
-			case StorageType.Memory:
-				strategy = new MemoryStorage(config.storage.flags);
-				break;
-			case StorageType.Redis:
-				strategy = new RedisStorage();
-				break;
-
-			default:
-				throw new Error("Unsupported storage type");
-		}
-
 		const enviroment = c.get("config")?.env;
-		c.flag = (flag: string) => {
-			return strategy.getValue(flag, enviroment);
+		c.flag = async (flag: string) => {
+			return config.adapter.getValue(flag, enviroment);
 		};
 		await next();
 	});
