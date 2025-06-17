@@ -1,13 +1,16 @@
 {
   "name": "hata",
   "scripts": {
-    "dev": "bun run --hot src/index.ts"
+    "dev": "tsup --watch",
+    "app": "bun run --hot src/testapp.ts",
+    "build": "tsup"
   },
   "dependencies": {
-    "hono": "^4.7.11",
-    "zod": "^3.25.64"
+    "hono": "^4.7.11"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@microsoft/api-extractor": "^7.52.8",
+    "@types/bun": "latest",
+    "tsup": "^8.5.0"
   }
 }
